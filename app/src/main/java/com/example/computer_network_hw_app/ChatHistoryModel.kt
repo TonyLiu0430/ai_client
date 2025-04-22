@@ -1,30 +1,21 @@
 package com.example.computer_network_hw_app
 
+import kotlinx.serialization.Serializable
 import javax.inject.Inject
 import javax.inject.Singleton
 
-class ChatHistory(public val id: Int, public val title: String) {
-}
+
+@Serializable
+data class ChatHistory(val id : Int, val title: String);
 
 @Singleton
-class ChatHistoryModel @Inject constructor(private val service : Service) {
+class ChatHistoryModel @Inject constructor(@ChatHistoryService private val service : Service) {
 
     suspend fun getChatHistory(): List<ChatHistory> {
         if (!service.isConnected) {
             throw Exception("Not connected to server")
         }
-        val response = {};//service.apiCall("getChatHistory", {})
-        val chatHistories = mutableListOf<ChatHistory>()
-        if (response is List<*>) {
-            for (item in response) {
-                if (item is Map<*, *>) {
-                    val chatHistory = ChatHistory(item["id"] as Int, item["title"] as String)
-                    chatHistories.add(chatHistory)
-                }
-            }
-        } else {
-            throw Exception("Invalid response from server")
-        }
-        return chatHistories
+        val response = service.apiCall<List<ChatHistory>, String>("getChatHistories", "NULL")
+        return response
     }
 }

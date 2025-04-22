@@ -1,5 +1,6 @@
 package com.example.computer_network_hw_app
 
+import androidx.compose.foundation.ScrollState
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -12,7 +13,8 @@ import javax.inject.Inject
 
 enum class Sender {
     USER,
-    BOT
+    BOT,
+    RECEIVING
 }
 
 @Serializable
@@ -24,9 +26,15 @@ data class ChatResponseType(val type: String)
 @Serializable
 data class ChatFlow(val messageChunk : String, val isEnd : Boolean);
 
+@Serializable
+data class CreateChatResponse(val id : Int);
+
+@Serializable
+data class ChatRequest(val message: String, val id : Int);
+
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val service : Service,
+    @ChatService private val service : Service,
 ) : ViewModel() {
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages
@@ -34,52 +42,115 @@ class ChatViewModel @Inject constructor(
     private val _serverConnected = MutableStateFlow(false)
     val serverConnected: StateFlow<Boolean> = _serverConnected
 
+    private var id : Int? = null
+
+    private val isReceiving = MutableStateFlow(false)
+    val receiving: StateFlow<Boolean> = isReceiving
+
+    private val _scrollState = MutableStateFlow(ScrollState(0))
+    val scrollState: StateFlow<ScrollState> = _scrollState
+
+    var scrollToMax = false
+
+    var softFollowBottom = false
+
     init {
         viewModelScope.launch {
             while(true) {
                 _serverConnected.value = service.isConnected
                 delay(100)
             }
-
         }
     }
 
     fun chat(message: String) {
-        if (!service.isConnected) {
-            throw Exception("Not connected to server")
-        }
-        val body = ChatMessage(message, Sender.USER)
         val newChatMessages = _chatMessages.value.toMutableList()
-        newChatMessages.add(body)
+        newChatMessages.add(ChatMessage(message, Sender.USER))
         _chatMessages.value = newChatMessages
+        scrollToMax()
+        if (id == null) {
+            viewModelScope.launch {
+                val response = service.apiCall<CreateChatResponse, String>("createChat", "NULL")
+                id = response.id
+                chatRequest(message)
+            }
+        }
+        else {
+            chatRequest(message)
+        }
+    }
+
+    fun changeChatId(newId: Int) {
+        id = newId
+        _chatMessages.value = emptyList()
         viewModelScope.launch {
-            val response = service.apiCall<ChatResponseType, ChatMessage>("chat", body)
-            val newChatMessagesInit = _chatMessages.value.toMutableList()
-            newChatMessagesInit.add(ChatMessage("", Sender.BOT))
-            _chatMessages.value = newChatMessagesInit
-            if(response.type == "Chunked") {
-                while(true) {
+            val request = mapOf(
+                "id" to id!!,
+            )
+            val response = service.apiCall<List<ChatMessage>, Map<String, Int>>("getHistory", request)
+            _chatMessages.value = response
+            scrollToMax()
+        }
+    }
+
+    fun startNewChat() {
+        id = null
+        _chatMessages.value = emptyList()
+    }
+
+
+    private fun scrollToMax() {
+        viewModelScope.launch {
+            delay(50)
+            _scrollState.value.scrollTo(_scrollState.value.maxValue)
+        }
+    }
+
+    private fun followBottom() {
+        softFollowBottom = true
+    }
+
+    private fun chatRequest(message: String) {
+        val body = ChatRequest(message, id!!)
+        viewModelScope.launch {
+            isReceiving.value = true
+
+            val response = service.apiCall<ChatResponseType, ChatRequest>("chat", body)
+            if (response.type == "Chunked") {
+                var ringIndex = 0;
+                val ringIcons = listOf("◴", "◵", "◶", "◷")
+                while(!service.readyToRead()) {
+                    val newChatMessages = _chatMessages.value.toMutableList()
+                    newChatMessages.add(ChatMessage(ringIcons[ringIndex], Sender.RECEIVING))
+                    ringIndex++;
+                    if (ringIndex >= ringIcons.size) {
+                        ringIndex = 0;
+                    }
+                    _chatMessages.value = newChatMessages
+                    scrollToMax()
+                    delay(150)
+                    newChatMessages.removeAt(newChatMessages.lastIndex)
+                }
+                val newChatMessagesInit = _chatMessages.value.toMutableList()
+                newChatMessagesInit.add(ChatMessage("", Sender.BOT))
+                _chatMessages.value = newChatMessagesInit
+                while (true) {
                     val chunk = service.read<ChatFlow>();
-                    if(chunk.isEnd) {
+                    if (chunk.isEnd) {
                         break;
                     }
                     val newChatMessages2 = _chatMessages.value.toMutableList()
-                    val botResp = ChatMessage(newChatMessages2.last().message + chunk.messageChunk, Sender.BOT)
+                    val botResp = ChatMessage(
+                        newChatMessages2.last().message + chunk.messageChunk,
+                        Sender.BOT
+                    )
                     newChatMessages2.removeAt(newChatMessages2.lastIndex)
                     newChatMessages2.add(botResp)
                     _chatMessages.value = newChatMessages2
+                    followBottom()
                 }
             }
-//            val newChatMessages2 = _chatMessages.value.toMutableList()
-//            newChatMessages2.add(response)
-//            _chatMessages.value = newChatMessages2
+            isReceiving.value = false
         }
-//        val response = viewModelScope.launch {
-//            service.apiCall(message, body) as ChatMessage
-//        }
-//
-//        val newChatMessages = _chatMessages.value.toMutableList()
-//        newChatMessages.add(body)
-//        newChatMessages.add(response)1
     }
 }
