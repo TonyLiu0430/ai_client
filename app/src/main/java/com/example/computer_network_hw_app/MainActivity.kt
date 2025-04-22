@@ -1,6 +1,7 @@
 package com.example.computer_network_hw_app
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -8,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -51,12 +53,15 @@ import dagger.hilt.android.AndroidEntryPoint
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
@@ -65,6 +70,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.Dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.window.layout.WindowMetricsCalculator
+import kotlinx.coroutines.delay
 import kotlin.math.max
 
 @AndroidEntryPoint
@@ -165,6 +172,7 @@ fun ChatScreen(navController: NavHostController) {
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatView(modifier : Modifier, viewModel: ChatViewModel = hiltViewModel()) {
     val chatMessages by viewModel.chatMessages.collectAsState()
@@ -172,30 +180,18 @@ fun ChatView(modifier : Modifier, viewModel: ChatViewModel = hiltViewModel()) {
 
     val view = LocalView.current
     val imeBottomPx = ViewCompat.getRootWindowInsets(view)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
-    LaunchedEffect(imeBottomPx) {
-        println("imeBottomPx: $imeBottomPx")
-        if(imeBottomPx > 0) {
-            scrollState.scrollTo(scrollState.value + imeBottomPx)
-        }
-    }
-
-    LaunchedEffect(scrollState.maxValue) {
-        println("scrollState.maxValue = ${scrollState.maxValue} scrollState.value = ${scrollState.value}")
-        if(viewModel.softFollowBottom) {
-            if (scrollState.maxValue - scrollState.value < 600) {
-                scrollState.scrollTo(scrollState.maxValue)
+    LaunchedEffect(WindowInsets.isImeVisible) {
+        val originValue = scrollState.value
+        for (i in 0..200) {
+            if(imeBottomPx > 0) {
+                scrollState.animateScrollTo(originValue + imeBottomPx)
             }
-            viewModel.softFollowBottom = false
+            delay(1)
         }
     }
 
-    LaunchedEffect(viewModel.scrollToMax) {
-        if (viewModel.scrollToMax) {
-            println("scrollToMax -> LaunchedEffect(scrollToMax) {")
-            scrollState.scrollTo(scrollState.maxValue)
-            viewModel.scrollToMax = false
-        }
-    }
+    val widthPixel = WindowMetricsCalculator.getOrCreate().computeCurrentWindowMetrics(LocalContext.current).bounds.width()
+    val screenWidthDp = with(LocalDensity.current) { widthPixel.toDp() }
 
     Column(
         modifier = modifier
@@ -214,7 +210,7 @@ fun ChatView(modifier : Modifier, viewModel: ChatViewModel = hiltViewModel()) {
                 ) {
                     Card(
                         shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.padding(4.dp)
+                        modifier = Modifier.padding(4.dp).widthIn(max = screenWidthDp * 0.65f),
                     ) {
                         Text(
                             text = chatMessage.message,
@@ -257,7 +253,14 @@ fun MessageInputField(modifier: Modifier = Modifier, viewModel: ChatViewModel = 
             value = text,
             onValueChange = { text = it },
             placeholder = { Text(inputHint) },
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            shape = MaterialTheme.shapes.small,
+            colors = TextFieldDefaults.colors(
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedContainerColor = Color(0xFF1E1E1E),
+                unfocusedContainerColor = Color(0xFF1E1E1E),
+            ),
         )
         IconButton(
             enabled = serverConnected && !receiving,

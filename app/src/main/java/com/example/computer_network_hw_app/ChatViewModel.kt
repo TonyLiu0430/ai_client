@@ -50,9 +50,6 @@ class ChatViewModel @Inject constructor(
     private val _scrollState = MutableStateFlow(ScrollState(0))
     val scrollState: StateFlow<ScrollState> = _scrollState
 
-    var scrollToMax = false
-
-    var softFollowBottom = false
 
     init {
         viewModelScope.launch {
@@ -81,6 +78,9 @@ class ChatViewModel @Inject constructor(
     }
 
     fun changeChatId(newId: Int) {
+        if(isReceiving.value) {
+            return;
+        }
         id = newId
         _chatMessages.value = emptyList()
         viewModelScope.launch {
@@ -94,6 +94,9 @@ class ChatViewModel @Inject constructor(
     }
 
     fun startNewChat() {
+        if(isReceiving.value) {
+            return;
+        }
         id = null
         _chatMessages.value = emptyList()
     }
@@ -101,13 +104,22 @@ class ChatViewModel @Inject constructor(
 
     private fun scrollToMax() {
         viewModelScope.launch {
-            delay(50)
-            _scrollState.value.scrollTo(_scrollState.value.maxValue)
+            for (i in 0..20) {
+                _scrollState.value.scrollTo(_scrollState.value.maxValue)
+                delay(1)
+            }
         }
     }
 
     private fun followBottom() {
-        softFollowBottom = true
+        viewModelScope.launch {
+            if(_scrollState.value.maxValue - _scrollState.value.value < 400) {
+                for (i in 0..20) {
+                    _scrollState.value.scrollTo(_scrollState.value.maxValue)
+                    delay(1)
+                }
+            }
+        }
     }
 
     private fun chatRequest(message: String) {
