@@ -22,7 +22,7 @@ class ChatHistoryViewModel @Inject constructor(private val chatHistoryModel: Cha
                 } catch (e: Exception) {
                     emptyList() // Handle error, e.g., show a message to the user
                 }
-                delay(2000) // Fetch every second
+                delay(500) // Fetch every second
             }
         }
     }

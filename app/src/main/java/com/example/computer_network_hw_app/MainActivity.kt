@@ -1,10 +1,18 @@
 package com.example.computer_network_hw_app
 
+import android.app.Activity
+import android.content.Context.CLIPBOARD_SERVICE
+import android.content.Intent
 import android.os.Bundle
+import android.speech.RecognizerIntent
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -59,6 +67,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
@@ -68,10 +77,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.Dp
+import androidx.core.app.ActivityCompat.startActivityForResult
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.window.layout.WindowMetricsCalculator
 import kotlinx.coroutines.delay
+import java.util.Locale
 import kotlin.math.max
 
 @AndroidEntryPoint
@@ -105,7 +117,7 @@ class MainActivity : ComponentActivity() {
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(paddingValues), // 這行確保內容不會被TopAppBar遮住
+                                    .padding(paddingValues),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 SettingScreen()
@@ -193,6 +205,8 @@ fun ChatView(modifier : Modifier, viewModel: ChatViewModel = hiltViewModel()) {
     val widthPixel = WindowMetricsCalculator.getOrCreate().computeCurrentWindowMetrics(LocalContext.current).bounds.width()
     val screenWidthDp = with(LocalDensity.current) { widthPixel.toDp() }
 
+
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -220,18 +234,66 @@ fun ChatView(modifier : Modifier, viewModel: ChatViewModel = hiltViewModel()) {
                     }
                 }
             } else { // BOT or RECEIVING
+                var expanded by remember { mutableStateOf(false) }
+                val receiving by viewModel.receiving.collectAsState()
+                var enableSelect by remember { mutableStateOf(false) }
                 Box(
                     modifier = modifier
                         .fillMaxWidth()
-                        .padding(4.dp),
+                        .padding(4.dp)
+                        .clickable {
+                            if (chatMessage.sender == Sender.BOT && !receiving /*TODO*/) {
+                                expanded = true
+                            }
+                        },
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    Text(
-                        text = chatMessage.message,
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = modifier.padding(8.dp),
-                        fontSize = if(chatMessage.sender == Sender.BOT) TextUnit.Unspecified else 30.sp,
-                    )
+                    if (enableSelect) {
+                        SelectionContainer {
+                            Text(
+                                text = chatMessage.message,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = modifier.padding(8.dp),
+                                fontSize = if (chatMessage.sender == Sender.BOT) TextUnit.Unspecified else 30.sp,
+                            )
+                        }
+                    }
+                    else {
+                        Text(
+                            text = chatMessage.message,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = modifier.padding(8.dp),
+                            fontSize = if (chatMessage.sender == Sender.BOT) TextUnit.Unspecified else 30.sp,
+                        )
+                    }
+
+
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                if (enableSelect) {
+                                    Text("取消選取")
+                                }
+                                else {
+                                    Text("選取內容")
+                                }
+                            },
+                            onClick = {
+                                enableSelect = true
+                                expanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("語音輸出") },
+                            onClick = {
+                                viewModel.tts.speech(chatMessage.message)
+                                expanded = false
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -244,6 +306,19 @@ fun MessageInputField(modifier: Modifier = Modifier, viewModel: ChatViewModel = 
     val serverConnected by viewModel.serverConnected.collectAsState().also { println("serverConnected: $it") }
     val receiving by viewModel.receiving.collectAsState()
     val inputHint = if (serverConnected) "輸入訊息" else "尚未連接伺服器"
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+        onResult = { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val data: Intent? = result.data
+                val results = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                if (!results.isNullOrEmpty()) {
+                    val recognizedText = results[0]
+                    viewModel.chat(recognizedText)
+                }
+            }
+        }
+    )
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -262,14 +337,33 @@ fun MessageInputField(modifier: Modifier = Modifier, viewModel: ChatViewModel = 
                 unfocusedContainerColor = Color(0xFF1E1E1E),
             ),
         )
-        IconButton(
-            enabled = serverConnected && !receiving,
-            onClick = {
-                viewModel.chat(text)
-                text = ""
+        if (text.isBlank()) {
+            // 語音識別
+            IconButton(
+                enabled = serverConnected && !receiving,
+                onClick = {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                    intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "說話啊")
+                    intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+
+                    speechRecognizerLauncher.launch(intent)
+                }
+            ) {
+                //<a href="https://www.flaticon.com/free-icons/radio" title="radio icons">Radio icons created by Freepik - Flaticon</a>
+                Icon(painter = painterResource(id = R.drawable.wave_sound), contentDescription = "Send")
             }
-        ) {
-            Icon(painter = painterResource(id = R.drawable.step_out_24), contentDescription = "Send")
+        }
+        else {
+            IconButton(
+                enabled = serverConnected && !receiving && text.isNotBlank(),
+                onClick = {
+                    viewModel.chat(text)
+                    text = ""
+                }
+            ) {
+                Icon(painter = painterResource(id = R.drawable.step_out_24), contentDescription = "Send")
+            }
         }
     }
 }
@@ -353,6 +447,13 @@ fun SettingScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             currentValue = viewModel.getSetting("SERVER_IP") ?: ""
         )
 
+        SettingsTextButton(
+            title = "icon provider",
+            description = "https://www.flaticon.com/free-icons/radio",
+            currentValue = "",
+            onClick = {}
+        )
+
         if (showDialog) {
             val serverIp = viewModel.getSetting("SERVER_IP") ?: ""
             var text by remember { mutableStateOf(serverIp) }
@@ -379,6 +480,8 @@ fun SettingScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 }
             )
         }
+
+
     }
 }
 

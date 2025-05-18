@@ -1,5 +1,8 @@
 package com.example.computer_network_hw_app
 
+import android.net.DnsResolver
+import android.os.Build
+import androidx.annotation.RequiresApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -84,7 +87,7 @@ import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-object DatabaseModule {
+object ServiceModule {
 
     @Provides
     @Singleton
@@ -142,6 +145,7 @@ class Service @Inject constructor(private val settingsModel: SettingsModel) : Co
         startPolling()
     }
 
+
     private suspend fun checkConnected() : Boolean {
         if (!isConnected) {
             val serverip = settingsModel.getSetting("SERVER_IP")
@@ -159,7 +163,7 @@ class Service @Inject constructor(private val settingsModel: SettingsModel) : Co
                         }
                     }
                     println("Connected to server: $ip:$port")
-                    connect(ip, port.toInt())
+                    setSocketOption()
                 } catch (e: Exception) {
                     println("Failed to connect to server: $e")
                     socket = null
@@ -174,7 +178,7 @@ class Service @Inject constructor(private val settingsModel: SettingsModel) : Co
         checkConnected();
     }
 
-    private fun connect(ip : String, port : Int) {
+    private fun setSocketOption() {
         socket!!.soTimeout = 150000
         socket!!.keepAlive = true
         socket!!.sendBufferSize = 1024 * 1024
@@ -209,7 +213,7 @@ class Service @Inject constructor(private val settingsModel: SettingsModel) : Co
                 val reader = socket!!.getInputStream().bufferedReader()
                 reader.readLine()
             }
-            return response
+            return decodeString(response)
         } catch(e: Exception) {
             reConnect()
             tryCnt++
@@ -237,7 +241,7 @@ class Service @Inject constructor(private val settingsModel: SettingsModel) : Co
                 val reader = socket!!.getInputStream().bufferedReader()
                 reader.readLine()
             }
-            return response
+            return decodeString(response)
         }catch(e: Exception) {
             reConnect()
             tryCnt++

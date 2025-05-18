@@ -1,13 +1,18 @@
 package com.example.computer_network_hw_app
 
+import android.content.Intent
+import android.speech.RecognizerIntent
 import androidx.compose.foundation.ScrollState
+import androidx.core.app.ActivityCompat.startActivityForResult
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import javax.inject.Inject
 
@@ -35,6 +40,7 @@ data class ChatRequest(val message: String, val id : Int);
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     @ChatService private val service : Service,
+    public val tts : Tts,
 ) : ViewModel() {
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages
@@ -113,7 +119,7 @@ class ChatViewModel @Inject constructor(
 
     private fun followBottom() {
         viewModelScope.launch {
-            if(_scrollState.value.maxValue - _scrollState.value.value < 400) {
+            if (_scrollState.value.maxValue - _scrollState.value.value < 400) {
                 for (i in 0..20) {
                     _scrollState.value.scrollTo(_scrollState.value.maxValue)
                     delay(1)
@@ -125,44 +131,48 @@ class ChatViewModel @Inject constructor(
     private fun chatRequest(message: String) {
         val body = ChatRequest(message, id!!)
         viewModelScope.launch {
-            isReceiving.value = true
+            try {
+                isReceiving.value = true
 
-            val response = service.apiCall<ChatResponseType, ChatRequest>("chat", body)
-            if (response.type == "Chunked") {
-                var ringIndex = 0;
-                val ringIcons = listOf("◴", "◵", "◶", "◷")
-                while(!service.readyToRead()) {
-                    val newChatMessages = _chatMessages.value.toMutableList()
-                    newChatMessages.add(ChatMessage(ringIcons[ringIndex], Sender.RECEIVING))
-                    ringIndex++;
-                    if (ringIndex >= ringIcons.size) {
-                        ringIndex = 0;
+                val response = service.apiCall<ChatResponseType, ChatRequest>("chat", body)
+                if (response.type == "Chunked") {
+                    var ringIndex = 0;
+                    val ringIcons = listOf("◴", "◷", "◶", "◵")
+                    while (!service.readyToRead()) {
+                        val newChatMessages = _chatMessages.value.toMutableList()
+                        newChatMessages.add(ChatMessage(ringIcons[ringIndex], Sender.RECEIVING))
+                        ringIndex++;
+                        if (ringIndex >= ringIcons.size) {
+                            ringIndex = 0;
+                        }
+                        _chatMessages.value = newChatMessages
+                        scrollToMax()
+                        delay(150)
+                        newChatMessages.removeAt(newChatMessages.lastIndex)
                     }
-                    _chatMessages.value = newChatMessages
-                    scrollToMax()
-                    delay(150)
-                    newChatMessages.removeAt(newChatMessages.lastIndex)
-                }
-                val newChatMessagesInit = _chatMessages.value.toMutableList()
-                newChatMessagesInit.add(ChatMessage("", Sender.BOT))
-                _chatMessages.value = newChatMessagesInit
-                while (true) {
-                    val chunk = service.read<ChatFlow>();
-                    if (chunk.isEnd) {
-                        break;
+                    val newChatMessagesInit = _chatMessages.value.toMutableList()
+                    newChatMessagesInit.add(ChatMessage("", Sender.BOT))
+                    _chatMessages.value = newChatMessagesInit
+                    while (true) {
+                        val chunk = service.read<ChatFlow>();
+                        if (chunk.isEnd) {
+                            break;
+                        }
+                        val newChatMessages2 = _chatMessages.value.toMutableList()
+                        val botResp = ChatMessage(
+                            newChatMessages2.last().message + chunk.messageChunk,
+                            Sender.BOT
+                        )
+                        newChatMessages2.removeAt(newChatMessages2.lastIndex)
+                        newChatMessages2.add(botResp)
+                        _chatMessages.value = newChatMessages2
+                        followBottom()
                     }
-                    val newChatMessages2 = _chatMessages.value.toMutableList()
-                    val botResp = ChatMessage(
-                        newChatMessages2.last().message + chunk.messageChunk,
-                        Sender.BOT
-                    )
-                    newChatMessages2.removeAt(newChatMessages2.lastIndex)
-                    newChatMessages2.add(botResp)
-                    _chatMessages.value = newChatMessages2
-                    followBottom()
                 }
             }
-            isReceiving.value = false
+            finally {
+                isReceiving.value = false
+            }
         }
     }
 }
